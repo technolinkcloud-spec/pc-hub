@@ -33,22 +33,33 @@ fi
 # Resolution order:
 #   1. KIOSK_USER env var (explicit override)
 #   2. SUDO_USER (when invoked via `sudo bash install.sh` as a normal user)
-#   3. DEFAULT_KIOSK_USER fallback if that account exists on the system
+#   3. DEFAULT_KIOSK_USER fallback (created if missing)
 # Root is rejected — Debian disables root tty1 autologin by default, so the
 # kiosk would never start.
 DEFAULT_KIOSK_USER="technolink"
 REAL_USER="${KIOSK_USER:-${SUDO_USER:-}}"
 if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
-    if id "$DEFAULT_KIOSK_USER" &>/dev/null; then
-        REAL_USER="$DEFAULT_KIOSK_USER"
-    fi
+    REAL_USER="$DEFAULT_KIOSK_USER"
 fi
-if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
-    error "Run via 'sudo bash install.sh' as a normal user, or set KIOSK_USER=<name>. Root cannot autologin on tty1."
+if [ "$REAL_USER" = "root" ]; then
+    error "Refusing to set up kiosk for root — root cannot autologin on tty1."
 fi
+
+# Create the kiosk user if it doesn't exist (minimal Debian may not have one).
+# Use an empty password so tty1 autologin works; the user can set a password
+# later with 'sudo passwd <user>'. Add to sudo for fleet maintenance.
+if ! id "$REAL_USER" &>/dev/null; then
+    log "Creating user '$REAL_USER'..."
+    useradd -m -s /bin/bash "$REAL_USER"
+    passwd -d "$REAL_USER" >/dev/null 2>&1 || true
+fi
+if ! id -nG "$REAL_USER" | tr ' ' '\n' | grep -qx sudo; then
+    usermod -aG sudo "$REAL_USER" 2>/dev/null || usermod -aG wheel "$REAL_USER" 2>/dev/null || true
+fi
+
 REAL_HOME=$(eval echo "~$REAL_USER")
 if [ ! -d "$REAL_HOME" ]; then
-    error "User '$REAL_USER' has no home directory ($REAL_HOME). Create the user first or pass KIOSK_USER=<name>."
+    error "User '$REAL_USER' has no home directory ($REAL_HOME)."
 fi
 
 # ── Config ───────────────────────────────────────────────────
@@ -132,7 +143,13 @@ install_packages() {
     case "$PKG_MGR" in
         apt)
             apt-get update -qq
-            apt-get install -y sudo python3 python3-pip python3-venv git sqlite3 curl
+            # Core: sudo, python stack, git, sqlite, curl, certs (minimal Debian
+            # may lack some of these), python-is-python3 for scripts that use
+            # bare `python`.
+            apt-get install -y \
+                sudo ca-certificates \
+                python3 python3-pip python3-venv python-is-python3 \
+                git sqlite3 curl wget unzip procps iproute2
             apt-get install -y network-manager 2>/dev/null || true
             apt-get install -y systemd-timesyncd libnss3-tools 2>/dev/null || true
             if [ "$HEADLESS" = true ]; then
