@@ -33,6 +33,17 @@ fi
 REAL_USER="${SUDO_USER:-$(whoami)}"
 REAL_HOME=$(eval echo "~$REAL_USER")
 
+# Refuse to set up a kiosk for 'root' — Debian disables root tty autologin by
+# default, so the kiosk would never start. Either invoke via 'sudo' as a normal
+# user, or pass KIOSK_USER=<name> to override.
+if [ -n "${KIOSK_USER:-}" ]; then
+    REAL_USER="$KIOSK_USER"
+    REAL_HOME=$(eval echo "~$REAL_USER")
+fi
+if [ "$REAL_USER" = "root" ]; then
+    error "Run via 'sudo bash install.sh' as a normal user, or set KIOSK_USER=<name>. Root cannot autologin on tty1."
+fi
+
 # ── Config ───────────────────────────────────────────────────
 INSTALL_DIR="/opt/kiosk-manager"
 SERVICE_USER="$REAL_USER"
@@ -81,6 +92,15 @@ else
         HEADLESS=false
         DISPLAY_SERVER="x11"
     fi
+fi
+
+# Override detection — set FORCE_KIOSK=1 to force kiosk display setup even when
+# a desktop is detected (useful when reinstalling on a system that came with a
+# GUI but should run as a dedicated kiosk).
+if [ "${FORCE_KIOSK:-0}" = "1" ]; then
+    HEADLESS=true
+    DISPLAY_SERVER="none"
+    warn "FORCE_KIOSK=1 — overriding display detection, will install kiosk setup"
 fi
 
 # Kiosk display setup runs on headless OR if .xinitrc already exists (re-install)
