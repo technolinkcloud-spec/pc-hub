@@ -29,19 +29,26 @@ if [ "$EUID" -ne 0 ]; then
     error "Please run as root: sudo bash install.sh"
 fi
 
-# ── Detect the real user (the one who called sudo) ───────────
-REAL_USER="${SUDO_USER:-$(whoami)}"
-REAL_HOME=$(eval echo "~$REAL_USER")
-
-# Refuse to set up a kiosk for 'root' — Debian disables root tty autologin by
-# default, so the kiosk would never start. Either invoke via 'sudo' as a normal
-# user, or pass KIOSK_USER=<name> to override.
-if [ -n "${KIOSK_USER:-}" ]; then
-    REAL_USER="$KIOSK_USER"
-    REAL_HOME=$(eval echo "~$REAL_USER")
+# ── Pick the kiosk user ──────────────────────────────────────
+# Resolution order:
+#   1. KIOSK_USER env var (explicit override)
+#   2. SUDO_USER (when invoked via `sudo bash install.sh` as a normal user)
+#   3. DEFAULT_KIOSK_USER fallback if that account exists on the system
+# Root is rejected — Debian disables root tty1 autologin by default, so the
+# kiosk would never start.
+DEFAULT_KIOSK_USER="technolink"
+REAL_USER="${KIOSK_USER:-${SUDO_USER:-}}"
+if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
+    if id "$DEFAULT_KIOSK_USER" &>/dev/null; then
+        REAL_USER="$DEFAULT_KIOSK_USER"
+    fi
 fi
-if [ "$REAL_USER" = "root" ]; then
+if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
     error "Run via 'sudo bash install.sh' as a normal user, or set KIOSK_USER=<name>. Root cannot autologin on tty1."
+fi
+REAL_HOME=$(eval echo "~$REAL_USER")
+if [ ! -d "$REAL_HOME" ]; then
+    error "User '$REAL_USER' has no home directory ($REAL_HOME). Create the user first or pass KIOSK_USER=<name>."
 fi
 
 # ── Config ───────────────────────────────────────────────────
