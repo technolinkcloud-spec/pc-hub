@@ -76,31 +76,23 @@ elif command -v pacman &>/dev/null; then
     PKG_MGR="pacman"
 fi
 
-# Detect display server
-# Only treat as non-headless if there is an ACTIVE display session or
-# a display manager is running. Xorg/Xwayland binaries alone do NOT count
-# (they may have been installed by a previous partial kiosk setup).
-HEADLESS=true
+# Detect display server (informational + chooses which packages to install)
+DISPLAY_SERVER="none"
 if [ -n "$WAYLAND_DISPLAY" ] || [ "$XDG_SESSION_TYPE" = "wayland" ]; then
     DISPLAY_SERVER="wayland"
-    HEADLESS=false
 elif [ -n "$DISPLAY" ] || [ "$XDG_SESSION_TYPE" = "x11" ]; then
     DISPLAY_SERVER="x11"
-    HEADLESS=false
-else
-    if systemctl is-active display-manager &>/dev/null 2>&1; then
-        HEADLESS=false
-        DISPLAY_SERVER="x11"
-    fi
+elif systemctl is-active display-manager &>/dev/null 2>&1; then
+    DISPLAY_SERVER="x11"
 fi
 
-# Override detection — set FORCE_KIOSK=1 to force kiosk display setup even when
-# a desktop is detected (useful when reinstalling on a system that came with a
-# GUI but should run as a dedicated kiosk).
-if [ "${FORCE_KIOSK:-0}" = "1" ]; then
-    HEADLESS=true
-    DISPLAY_SERVER="none"
-    warn "FORCE_KIOSK=1 — overriding display detection, will install kiosk setup"
+# This is a kiosk installer — kiosk display setup is the default.
+# Set SKIP_KIOSK_DISPLAY=1 if you're installing the dashboard on a machine
+# that should keep its own desktop (e.g., a dev workstation).
+HEADLESS=true
+if [ "${SKIP_KIOSK_DISPLAY:-0}" = "1" ]; then
+    HEADLESS=false
+    warn "SKIP_KIOSK_DISPLAY=1 — kiosk display setup will be skipped"
 fi
 
 # Kiosk display setup runs on headless OR if .xinitrc already exists (re-install)
@@ -111,10 +103,11 @@ fi
 
 log "Distro:          $DISTRO (${PRETTY_NAME:-$DISTRO})"
 log "Package manager: $PKG_MGR"
+log "Display server:  $DISPLAY_SERVER"
 if [ "$HEADLESS" = true ]; then
-    log "Display server:  ${YELLOW}none (CLI) — will install X11 + Openbox + Chrome kiosk${NC}"
+    log "Kiosk mode:      ${GREEN}ON${NC} — will install X11 + Openbox + Chrome kiosk (SKIP_KIOSK_DISPLAY=1 to opt out)"
 else
-    log "Display server:  $DISPLAY_SERVER"
+    log "Kiosk mode:      ${YELLOW}OFF${NC} (SKIP_KIOSK_DISPLAY=1 was set)"
 fi
 log "Installing as:   $SERVICE_USER"
 log "Install dir:     $INSTALL_DIR"
