@@ -374,6 +374,9 @@ WorkingDirectory=$INSTALL_DIR
 ExecStart=$INSTALL_DIR/venv/bin/gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120 --access-logfile - --error-logfile - wsgi:app
 Restart=always
 RestartSec=5
+# Allow non-root $SERVICE_USER to bind privileged ports (e.g. :80)
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $SERVICE_USER)
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u $SERVICE_USER)/bus
 Environment=KIOSK_SECRET_KEY=$SECRET_KEY
