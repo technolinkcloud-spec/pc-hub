@@ -173,16 +173,22 @@ def pull():
                 else:
                     for pip_line in pip_proc.stderr.strip().splitlines():
                         yield f"data: [ERROR] {pip_line}\n\n"
-                yield "data: [RESTARTING] Restarting service...\n\n"
+                yield "data: [RESTARTING] Service restart scheduled in 3s...\n\n"
+                yield "data: [DONE]\n\n"
                 try:
                     sys = get_sys()
                     systemctl_bin = sys.bin('systemctl') or 'systemctl'
+                    # Detach with a small delay so this SSE handler can finish
+                    # before systemd SIGTERMs our process group.
                     subprocess.Popen(
-                        ['sudo', systemctl_bin, 'restart', 'kiosk-manager'],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        ['sh', '-c',
+                         f'sleep 3 && sudo {systemctl_bin} restart kiosk-manager'],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        start_new_session=True,
                     )
                 except Exception:
                     yield "data: [INFO] Auto-restart not available. Please restart manually.\n\n"
+                return
             else:
                 yield f"data: [ERROR] Update failed with exit code {proc.returncode}\n\n"
 
