@@ -16,21 +16,62 @@ update_bp = Blueprint('update', __name__)
 CANONICAL_REPO_URL = 'https://github.com/technolinkcloud-spec/pc-hub.git'
 
 
+def _git(args, timeout=5):
+    """Run a git command in BASE_DIR; return (stdout, rc)."""
+    p = subprocess.run(['git', *args], capture_output=True, text=True,
+                       cwd=BASE_DIR, timeout=timeout)
+    return p.stdout.strip(), p.returncode
+
+
 def _ensure_correct_remote():
-    """Repoint origin if the deployed kiosk was installed from a stale URL."""
+    """Repoint origin to the canonical repo and reconcile the local branch
+    with origin/main if the kiosk was installed from a stale URL/branch."""
     try:
-        current = subprocess.run(
-            ['git', 'remote', 'get-url', 'origin'],
-            capture_output=True, text=True, cwd=BASE_DIR, timeout=5
-        ).stdout.strip()
+        current, _ = _git(['remote', 'get-url', 'origin'])
         if current and current != CANONICAL_REPO_URL:
             logger.info('Updating origin URL: %s -> %s', current, CANONICAL_REPO_URL)
-            subprocess.run(
-                ['git', 'remote', 'set-url', 'origin', CANONICAL_REPO_URL],
-                capture_output=True, text=True, cwd=BASE_DIR, timeout=5
-            )
+            _git(['remote', 'set-url', 'origin', CANONICAL_REPO_URL])
+            # After repointing, the old origin/<branch> refs are stale.
+            _git(['fetch', 'origin', '--prune'], timeout=30)
+
+        # Reconcile branch: if local branch tracks a ref that no longer exists
+        # on the new remote, point it at origin/main (or origin/master).
+        local_branch, _ = _git(['rev-parse', '--abbrev-ref', 'HEAD'])
+        if not local_branch or local_branch == 'HEAD':
+            return
+
+        # Does origin actually have this branch?
+        _, rc = _git(['show-ref', '--verify', '--quiet',
+                      f'refs/remotes/origin/{local_branch}'])
+        if rc == 0:
+            return  # local branch tracks something real, nothing to do
+
+        # Pick a target that exists on the new remote
+        target = None
+        for candidate in ('main', 'master'):
+            _, rc = _git(['show-ref', '--verify', '--quiet',
+                          f'refs/remotes/origin/{candidate}'])
+            if rc == 0:
+                target = candidate
+                break
+        if not target:
+            logger.warning('Neither origin/main nor origin/master exists; skipping branch fix')
+            return
+
+        # Rename local branch so the dashboard label matches what we track
+        if local_branch != target:
+            _, rc = _git(['show-ref', '--verify', '--quiet', f'refs/heads/{target}'])
+            if rc == 0:
+                logger.info('Switching to existing local branch %s', target)
+                _git(['checkout', target])
+                _git(['branch', '-D', local_branch])
+            else:
+                logger.info('Renaming local branch %s -> %s', local_branch, target)
+                _git(['branch', '-m', local_branch, target])
+
+        _git(['branch', '--set-upstream-to', f'origin/{target}', target])
     except Exception as e:
-        logger.warning('Could not verify/fix origin URL: %s', e)
+        logger.warning('Could not verify/fix origin URL or branch: %s', e)
 
 
 def _get_version():
