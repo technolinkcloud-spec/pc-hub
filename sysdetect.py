@@ -331,35 +331,47 @@ class SystemInfo:
         return platform.release()
 
     def get_env_with_display(self):
-        """Return env dict with DISPLAY and XAUTHORITY set."""
+        """Return env dict with DISPLAY and XAUTHORITY discovered from the live
+        X session. Falls back to the service's own env if X isn't running yet."""
         env = os.environ.copy()
-        if self.display_server == 'x11':
+        x_display, x_auth, w_display, xdg_runtime = _read_x_session_env()
+        if x_display:
+            env['DISPLAY'] = x_display
+        else:
             env.setdefault('DISPLAY', ':0')
-            # XAUTHORITY is required for X11 tools to authenticate
-            if 'XAUTHORITY' not in env:
-                # Try common locations
-                user_home = os.path.expanduser('~')
-                xauth = os.path.join(user_home, '.Xauthority')
-                if os.path.exists(xauth):
-                    env['XAUTHORITY'] = xauth
-                else:
-                    # Try /run/user/<uid>/gdm/Xauthority (GDM)
-                    uid = os.getuid()
-                    for candidate in [
-                        f'/run/user/{uid}/gdm/Xauthority',
-                        f'/tmp/.Xauthority-{uid}',
-                    ]:
-                        if os.path.exists(candidate):
-                            env['XAUTHORITY'] = candidate
-                            break
+        if x_auth and os.path.exists(x_auth):
+            env['XAUTHORITY'] = x_auth
+        elif 'XAUTHORITY' not in env or not os.path.exists(env['XAUTHORITY']):
+            # Probe common locations
+            uid = os.getuid()
+            candidates = [
+                os.path.expanduser('~/.Xauthority'),
+                f'/run/user/{uid}/gdm/Xauthority',
+                f'/tmp/.Xauthority-{uid}',
+            ]
+            # Also probe the kiosk user's home (when service runs as them)
+            try:
+                import pwd
+                for entry in pwd.getpwall():
+                    if 1000 <= entry.pw_uid < 65000:
+                        candidates.append(os.path.join(entry.pw_dir, '.Xauthority'))
+            except Exception:
+                pass
+            for c in candidates:
+                if c and os.path.exists(c):
+                    env['XAUTHORITY'] = c
+                    break
+        if w_display:
+            env['WAYLAND_DISPLAY'] = w_display
         elif self.display_server == 'wayland':
             env.setdefault('WAYLAND_DISPLAY', 'wayland-0')
-            # XDG_RUNTIME_DIR needed for Wayland compositors
-            if 'XDG_RUNTIME_DIR' not in env:
-                uid = os.getuid()
-                xdg_dir = f'/run/user/{uid}'
-                if os.path.isdir(xdg_dir):
-                    env['XDG_RUNTIME_DIR'] = xdg_dir
+        if xdg_runtime:
+            env['XDG_RUNTIME_DIR'] = xdg_runtime
+        elif 'XDG_RUNTIME_DIR' not in env:
+            uid = os.getuid()
+            xdg_dir = f'/run/user/{uid}'
+            if os.path.isdir(xdg_dir):
+                env['XDG_RUNTIME_DIR'] = xdg_dir
         return env
 
     def summary(self):
@@ -375,6 +387,62 @@ class SystemInfo:
             'browser': self.get_browser() or 'not found',
             'available_tools': list(self._cache['bins'].keys()),
         }
+
+
+# ── X session discovery ──────────────────────────────────────
+
+def _read_x_session_env():
+    """Find the running X/Wayland session's env by reading /proc/<pid>/environ.
+    Returns (DISPLAY, XAUTHORITY, WAYLAND_DISPLAY, XDG_RUNTIME_DIR), any of
+    which may be None if not discoverable.
+    """
+    display = xauth = wayland = xdg_runtime = None
+    if not os.path.isdir('/proc'):
+        return display, xauth, wayland, xdg_runtime
+    # Look at common display server process names. Walk /proc cheaply.
+    targets = ('Xorg', 'Xwayland', 'gnome-shell', 'startplasma',
+               'sway', 'weston', 'mutter', 'kwin_wayland', 'kwin_x11',
+               'openbox')
+    try:
+        for pid in os.listdir('/proc'):
+            if not pid.isdigit():
+                continue
+            comm_path = f'/proc/{pid}/comm'
+            try:
+                with open(comm_path) as f:
+                    comm = f.read().strip()
+            except (FileNotFoundError, PermissionError):
+                continue
+            if comm not in targets:
+                continue
+            env_path = f'/proc/{pid}/environ'
+            try:
+                with open(env_path, 'rb') as f:
+                    raw = f.read()
+            except (FileNotFoundError, PermissionError):
+                continue
+            for chunk in raw.split(b'\0'):
+                if b'=' not in chunk:
+                    continue
+                key, _, val = chunk.partition(b'=')
+                try:
+                    k = key.decode('ascii', errors='replace')
+                    v = val.decode('utf-8', errors='replace')
+                except Exception:
+                    continue
+                if k == 'DISPLAY' and not display:
+                    display = v
+                elif k == 'XAUTHORITY' and not xauth:
+                    xauth = v
+                elif k == 'WAYLAND_DISPLAY' and not wayland:
+                    wayland = v
+                elif k == 'XDG_RUNTIME_DIR' and not xdg_runtime:
+                    xdg_runtime = v
+            if display and xauth:
+                break
+    except Exception:
+        pass
+    return display, xauth, wayland, xdg_runtime
 
 
 # ── Singleton ────────────────────────────────────────────────

@@ -153,11 +153,14 @@ install_packages() {
             apt-get install -y network-manager 2>/dev/null || true
             apt-get install -y systemd-timesyncd libnss3-tools 2>/dev/null || true
             if [ "$HEADLESS" = true ]; then
-                # CLI system → install X11 + Openbox + browser + kiosk tools
+                # CLI system → install X11 + Openbox + browser + kiosk tools.
+                # Install in separate commands so one missing package can't
+                # silently skip the rest (xrandr comes from x11-xserver-utils
+                # and is required for the Display page to work).
                 log "Installing X11, Openbox, Chromium, and kiosk tools..."
-                apt-get install -y \
-                    xorg openbox \
-                    scrot x11-xserver-utils 2>/dev/null || true
+                apt-get install -y xorg openbox || true
+                apt-get install -y x11-xserver-utils || true
+                apt-get install -y scrot || true
                 apt-get install -y chromium 2>/dev/null || \
                     apt-get install -y chromium-browser 2>/dev/null || true
             else
