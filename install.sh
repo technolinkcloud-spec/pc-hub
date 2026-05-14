@@ -152,6 +152,9 @@ install_packages() {
                 git sqlite3 curl wget unzip procps iproute2
             apt-get install -y network-manager 2>/dev/null || true
             apt-get install -y systemd-timesyncd libnss3-tools 2>/dev/null || true
+            # Networking + audio tools (audio for kiosk media, ethtool for WoL).
+            apt-get install -y ethtool net-tools 2>/dev/null || true
+            apt-get install -y alsa-utils pulseaudio pavucontrol 2>/dev/null || true
             if [ "$HEADLESS" = true ]; then
                 # CLI system → install X11 + Openbox + browser + kiosk tools.
                 # Install in separate commands so one missing package can't
@@ -315,6 +318,9 @@ add_sudoers_entry hostnamectl ""
 # Network config: ifupdown support
 add_sudoers_entry ifdown ""
 add_sudoers_entry ifup ""
+
+# Wake-on-LAN configuration
+add_sudoers_entry ethtool ""
 
 # File writing: tee and cp for /etc/network/interfaces, /etc/environment
 add_sudoers_entry tee ""

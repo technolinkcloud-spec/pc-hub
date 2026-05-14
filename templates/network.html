@@ -71,6 +71,16 @@
             </div>
         </div>
         <div style="border-top:1px solid var(--border);margin:16px 0;padding-top:12px;">
+            <div class="nav-section-title" style="padding-left:0;">Wake-on-LAN</div>
+        </div>
+        <div class="form-group">
+            <label class="form-checkbox">
+                <input type="checkbox" id="config-wol">
+                <span>Enable Wake-on-LAN (writes <code>ethtool -s &lt;iface&gt; wol g</code> to /etc/network/interfaces)</span>
+            </label>
+            <div id="config-wol-runtime" class="text-muted" style="font-size:12px;margin-top:4px;"></div>
+        </div>
+        <div style="border-top:1px solid var(--border);margin:16px 0;padding-top:12px;">
             <div class="nav-section-title" style="padding-left:0;">Proxy Settings</div>
         </div>
         <div class="form-group">
@@ -159,6 +169,16 @@ function configureIface(name) {
         }
         toggleStaticFields();
     }).catch(() => {});
+
+    // Fetch WoL state separately so a missing endpoint can't break the form
+    $('#config-wol').checked = false;
+    $('#config-wol-runtime').textContent = '';
+    api('/network/api/wol/' + encodeURIComponent(name)).then(w => {
+        $('#config-wol').checked = !!w.enabled;
+        if (w.runtime) {
+            $('#config-wol-runtime').textContent = 'Current runtime: Wake-on=' + w.runtime + ' (g=magic packet, d=disabled)';
+        }
+    }).catch(() => {});
 }
 
 function toggleStaticFields() {
@@ -183,6 +203,7 @@ function applyConfig() {
         data.alt_ip = $('#config-alt-ip').value.trim();
         data.alt_subnet = $('#config-alt-subnet').value.trim();
     }
+    const wolEnabled = $('#config-wol').checked;
     Modal.show('Apply Network Configuration',
         'This will modify the network settings for <strong>' + escapeHtml(currentIface) + '</strong>. The connection may be briefly interrupted.',
         () => {
@@ -192,6 +213,10 @@ function applyConfig() {
                 } else {
                     Toast.success('Network configuration applied');
                 }
+                // Apply WoL change independently so it succeeds/fails on its own
+                return api('/network/api/wol/' + encodeURIComponent(currentIface),
+                           { method: 'POST', body: { enabled: wolEnabled } });
+            }).then(() => {
                 setTimeout(loadInterfaces, 2000);
             }).catch(err => Toast.error(err.message));
         },
@@ -211,29 +236,17 @@ document.addEventListener('DOMContentLoaded', () => {
     loadInterfaces();
 
     document.querySelectorAll('.ip-input').forEach(input => {
+        // Sanitize input: only digits and dots, max 4 octets, each 0-255.
+        // No auto-dot — the user types the dots themselves.
         input.addEventListener('input', function(e) {
             let val = this.value.replace(/[^0-9.]/g, '');
             const parts = val.split('.');
-            // Limit to 4 octets
             if (parts.length > 4) parts.length = 4;
-            // Cap each octet to 3 digits and value 0-255
             for (let i = 0; i < parts.length; i++) {
                 if (parts[i].length > 3) parts[i] = parts[i].slice(0, 3);
                 if (parseInt(parts[i], 10) > 255) parts[i] = '255';
             }
-            val = parts.join('.');
-            this.value = val;
-        });
-        input.addEventListener('keyup', function(e) {
-            if (e.key === 'Backspace' || e.key === 'Delete' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') return;
-            const parts = this.value.split('.');
-            if (parts.length < 4) {
-                const last = parts[parts.length - 1];
-                // Auto-add dot after 3 digits or when octet reaches 26+ (must be done)
-                if (last.length === 3 || (last.length >= 1 && parseInt(last, 10) > 25 && last.length >= 2)) {
-                    this.value += '.';
-                }
-            }
+            this.value = parts.join('.');
         });
     });
 });

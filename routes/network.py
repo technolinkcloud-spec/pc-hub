@@ -294,6 +294,117 @@ def interfaces():
     return jsonify({'interfaces': _get_interfaces()})
 
 
+# ── Wake-on-LAN ──────────────────────────────────────────────
+
+INTERFACES_FILE = '/etc/network/interfaces'
+
+
+def _wol_stanza_re(iface):
+    """Match an 'up ethtool -s <iface> wol g' line for a given iface."""
+    return re.compile(rf'^\s*up\s+ethtool\s+-s\s+{re.escape(iface)}\s+wol\s+g\s*$',
+                      re.MULTILINE)
+
+
+def _is_wol_enabled(iface):
+    """Return True if /etc/network/interfaces has the ethtool WoL line for iface."""
+    if not os.path.exists(INTERFACES_FILE):
+        return False
+    try:
+        with open(INTERFACES_FILE) as f:
+            content = f.read()
+    except Exception:
+        return False
+    return bool(_wol_stanza_re(iface).search(content))
+
+
+def _set_wol(iface, enable):
+    """Add or remove the ethtool WoL line for iface in /etc/network/interfaces.
+    Returns (ok, message)."""
+    if not os.path.exists(INTERFACES_FILE):
+        return False, '/etc/network/interfaces not found'
+    try:
+        with open(INTERFACES_FILE) as f:
+            content = f.read()
+    except Exception as e:
+        return False, f'Read failed: {e}'
+
+    already_enabled = bool(_wol_stanza_re(iface).search(content))
+
+    if enable:
+        if already_enabled:
+            return True, 'Wake-on-LAN already enabled'
+        # Inject the line into the iface stanza if present, else create a stub.
+        iface_re = re.compile(rf'^(iface\s+{re.escape(iface)}\s+inet\s+\S+)$',
+                              re.MULTILINE)
+        if iface_re.search(content):
+            content = iface_re.sub(rf'\1\n    up ethtool -s {iface} wol g',
+                                   content, count=1)
+        else:
+            # No stanza for this iface — append a minimal one so the line takes
+            # effect at ifup. We use 'manual' so we don't override DHCP/NM.
+            if content and not content.endswith('\n'):
+                content += '\n'
+            content += f'\nallow-hotplug {iface}\niface {iface} inet manual\n    up ethtool -s {iface} wol g\n'
+    else:
+        if not already_enabled:
+            return True, 'Wake-on-LAN already disabled'
+        content = _wol_stanza_re(iface).sub('', content)
+        # Collapse runs of blank lines left behind
+        content = re.sub(r'\n{3,}', '\n\n', content)
+
+    try:
+        proc = subprocess.run(['sudo', 'tee', INTERFACES_FILE],
+                              input=content, capture_output=True, text=True, timeout=10)
+        if proc.returncode != 0:
+            return False, f'Write failed: {proc.stderr.strip()}'
+    except Exception as e:
+        return False, f'Write failed: {e}'
+
+    # Apply immediately so the user doesn't have to reboot. Best-effort.
+    sys = get_sys()
+    ethtool = sys.bin('ethtool') or '/usr/sbin/ethtool'
+    if enable:
+        _run_cmd(['sudo', ethtool, '-s', iface, 'wol', 'g'])
+    else:
+        _run_cmd(['sudo', ethtool, '-s', iface, 'wol', 'd'])
+    return True, 'OK'
+
+
+@network_bp.route('/api/wol/<name>', methods=['GET'])
+@login_required
+def wol_status(name):
+    if not SAFE_IFACE_RE.match(name):
+        return jsonify({'error': 'Invalid interface name'}), 400
+    # Also report the current runtime state from ethtool when available.
+    runtime = None
+    sys = get_sys()
+    ethtool = sys.bin('ethtool')
+    if ethtool:
+        out, rc = _run_cmd([ethtool, name])
+        if rc == 0:
+            m = re.search(r'Wake-on:\s*([gpubmsadf]+)', out)
+            if m:
+                runtime = m.group(1)
+    return jsonify({
+        'iface': name,
+        'enabled': _is_wol_enabled(name),
+        'runtime': runtime,
+    })
+
+
+@network_bp.route('/api/wol/<name>', methods=['POST'])
+@login_required
+def wol_set(name):
+    if not SAFE_IFACE_RE.match(name):
+        return jsonify({'error': 'Invalid interface name'}), 400
+    data = request.get_json() or {}
+    enable = bool(data.get('enabled', False))
+    ok, msg = _set_wol(name, enable)
+    if not ok:
+        return jsonify({'error': msg}), 500
+    return jsonify({'success': True, 'enabled': enable, 'message': msg})
+
+
 @network_bp.route('/api/iface-config/<name>')
 @login_required
 def iface_config(name):
