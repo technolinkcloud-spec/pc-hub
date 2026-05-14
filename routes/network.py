@@ -105,18 +105,38 @@ def _parse_ifupdown_config(iface):
     return config
 
 
+def _find_nm_connection(nmcli, iface):
+    """Find NM connection profile for a device. Returns None if none targets it.
+
+    Unlike _get_connection_name, this does NOT fall back to the iface name —
+    used by the read path so we can fall through to ifupdown when there is
+    truly no NM profile for this device.
+    """
+    out, rc = _run_cmd([nmcli, '-g', 'GENERAL.CONNECTION', 'device', 'show', iface])
+    if rc == 0 and out.strip() and out.strip() != '--':
+        return out.strip()
+    out, rc = _run_cmd([nmcli, '-t', '-f', 'NAME,DEVICE', 'con', 'show'])
+    if rc == 0:
+        for line in out.split('\n'):
+            parts = line.rsplit(':', 1)
+            if len(parts) == 2 and parts[1].strip() == iface:
+                return parts[0].replace('\\:', ':')
+    return None
+
+
 def _get_iface_config_linux(iface_name):
     """Get current config for a Linux interface."""
     sys = get_sys()
     ip_bin = sys.bin('ip')
     config = {'method': 'dhcp', 'ip': '', 'subnet': '', 'gateway': '', 'dns': ''}
 
-    # Try NM first — it is authoritative when it manages the interface
+    # Try NM first — it is authoritative when it manages the interface.
+    # Look up the connection profile even if no active connection (e.g. after
+    # a static→DHCP switch where con up failed or the device is still settling).
     nmcli = sys.bin('nmcli')
     if nmcli and _is_nm_managed(nmcli, iface_name):
-        output, rc = _run_cmd([nmcli, '-g', 'GENERAL.CONNECTION', 'device', 'show', iface_name])
-        if rc == 0 and output.strip() and output.strip() != '--':
-            conn = output.strip()
+        conn = _find_nm_connection(nmcli, iface_name)
+        if conn:
             # Get method
             out, _ = _run_cmd([nmcli, '-g', 'ipv4.method', 'con', 'show', conn])
             if out.strip() == 'manual':
@@ -287,7 +307,10 @@ def iface_config(name):
         config = {'method': 'dhcp', 'ip': '', 'subnet': '', 'gateway': '', 'dns': ''}
     # Also return proxy settings
     config['proxy'] = _get_proxy_settings()
-    return jsonify(config)
+    resp = jsonify(config)
+    # Prevent stale UI state after a config change — never serve from cache
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 
 def _get_proxy_settings():
@@ -435,7 +458,8 @@ def _remove_ifupdown_iface(iface):
             if re.match(rf'^(auto|iface|allow-hotplug)\s+{re.escape(iface)}\b', line):
                 skip = True
                 continue
-            if skip and (line.startswith('    ') or line.startswith('\t') or line.strip() == ''):
+            # Consume any indented body line (space- or tab-indented) and blank lines
+            if skip and (line.startswith(' ') or line.startswith('\t') or line.strip() == ''):
                 continue
             skip = False
             new_lines.append(line)
@@ -450,6 +474,7 @@ def _remove_ifupdown_iface(iface):
 def _configure_nmcli(nmcli, iface, method, data):
     """Configure network interface using nmcli."""
     conn_name = _get_connection_name(nmcli, iface)
+    logger.info('Configuring %s on profile "%s" with method=%s', iface, conn_name, method)
 
     if method == 'dhcp':
         output, rc = _run_cmd([
@@ -462,6 +487,14 @@ def _configure_nmcli(nmcli, iface, method, data):
             return jsonify({'error': f'Failed to set DHCP: {output[:200]}'}), 500
         # Clear any leftover static addresses separately (empty string clears the list)
         _run_cmd(['sudo', nmcli, 'con', 'mod', conn_name, 'ipv4.addresses', ''])
+        # Verify the method actually persisted — if not, the modify silently
+        # targeted the wrong profile or NM ignored the change. Log loudly so we
+        # can catch this in the field instead of returning success while the UI
+        # keeps reading 'manual'.
+        verify, _ = _run_cmd([nmcli, '-g', 'ipv4.method', 'con', 'show', conn_name])
+        if verify.strip() != 'auto':
+            logger.warning('NM profile "%s" reports ipv4.method=%r after DHCP modify (expected auto)',
+                           conn_name, verify.strip())
         # Also remove static stanza from /etc/network/interfaces to prevent
         # networking.service from re-applying the old static IP on reboot
         _remove_ifupdown_iface(iface)
@@ -580,7 +613,8 @@ def _configure_ifupdown(iface, method, data):
             if re.match(rf'^(auto|iface|allow-hotplug)\s+{re.escape(iface)}\b', line):
                 skip = True
                 continue
-            if skip and (line.startswith('    ') or line.startswith('\t') or line.strip() == ''):
+            # Consume any indented body line (space- or tab-indented) and blank lines
+            if skip and (line.startswith(' ') or line.startswith('\t') or line.strip() == ''):
                 continue
             skip = False
             new_lines.append(line)
