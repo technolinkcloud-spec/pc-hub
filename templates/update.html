@@ -20,6 +20,10 @@
         <div class="stat-value" id="update-commit" style="font-size:14px;">-</div>
     </div>
 </div>
+<div class="card mt-2" style="padding:8px 12px;">
+    <span class="text-muted" style="font-size:12px;">Origin:&nbsp;</span>
+    <code id="update-remote" style="font-size:12px;">-</code>
+</div>
 
 <div class="card mt-4">
     <div class="card-header">
@@ -66,6 +70,7 @@ function loadUpdateInfo() {
         $('#update-version').textContent = 'v' + (data.version || '?');
         $('#update-branch').textContent = data.git.branch || 'N/A';
         $('#update-commit').textContent = data.git.commit || 'N/A';
+        $('#update-remote').textContent = data.git.remote || 'N/A';
     }).catch(() => {});
 }
 

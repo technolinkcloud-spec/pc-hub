@@ -13,6 +13,25 @@ logger = logging.getLogger(__name__)
 
 update_bp = Blueprint('update', __name__)
 
+CANONICAL_REPO_URL = 'https://github.com/technolinkcloud-spec/pc-hub.git'
+
+
+def _ensure_correct_remote():
+    """Repoint origin if the deployed kiosk was installed from a stale URL."""
+    try:
+        current = subprocess.run(
+            ['git', 'remote', 'get-url', 'origin'],
+            capture_output=True, text=True, cwd=BASE_DIR, timeout=5
+        ).stdout.strip()
+        if current and current != CANONICAL_REPO_URL:
+            logger.info('Updating origin URL: %s -> %s', current, CANONICAL_REPO_URL)
+            subprocess.run(
+                ['git', 'remote', 'set-url', 'origin', CANONICAL_REPO_URL],
+                capture_output=True, text=True, cwd=BASE_DIR, timeout=5
+            )
+    except Exception as e:
+        logger.warning('Could not verify/fix origin URL: %s', e)
+
 
 def _get_version():
     if os.path.exists(VERSION_FILE):
@@ -31,9 +50,13 @@ def _get_git_info():
             ['git', 'log', '-1', '--format=%h %s'],
             capture_output=True, text=True, cwd=BASE_DIR, timeout=5
         ).stdout.strip()
-        return {'branch': branch, 'commit': commit}
+        remote = subprocess.run(
+            ['git', 'remote', 'get-url', 'origin'],
+            capture_output=True, text=True, cwd=BASE_DIR, timeout=5
+        ).stdout.strip()
+        return {'branch': branch, 'commit': commit, 'remote': remote}
     except Exception:
-        return {'branch': 'N/A', 'commit': 'N/A'}
+        return {'branch': 'N/A', 'commit': 'N/A', 'remote': 'N/A'}
 
 
 @update_bp.route('/')
@@ -55,6 +78,7 @@ def info():
 @login_required
 def check_updates():
     try:
+        _ensure_correct_remote()
         subprocess.run(
             ['git', 'fetch'], capture_output=True, text=True,
             cwd=BASE_DIR, timeout=30
@@ -83,6 +107,7 @@ def check_updates():
 def pull():
     def generate():
         try:
+            _ensure_correct_remote()
             proc = subprocess.Popen(
                 ['git', 'pull', '--ff-only'],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
