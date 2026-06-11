@@ -197,21 +197,27 @@
         if (keyboardEl) keyboardEl.style.display = 'none';
         activeInput = null;
         document.documentElement.style.scrollPaddingBottom = '';
+        document.body.style.paddingBottom = '';
     }
 
     function scrollInputIntoView() {
         if (!activeInput || !keyboardEl) return;
-        // Wait one frame so keyboard is rendered and has a measurable height
+        // Wait one frame so the keyboard is rendered and has a measurable height
         requestAnimationFrame(function() {
             const kbHeight = keyboardEl.offsetHeight;
-            // Add scroll-padding so scrollIntoView stops above the keyboard
-            document.documentElement.style.scrollPaddingBottom = (kbHeight + 16) + 'px';
-            // Check if the input is hidden behind the keyboard
+            // Add REAL space at the bottom of the page. scroll-padding alone
+            // can't lift an input that sits at the very end of the page — there
+            // has to be something below it to scroll into. This padding gives
+            // the page room to scroll the focused field above the keyboard.
+            document.body.style.paddingBottom = (kbHeight + 24) + 'px';
+
+            const margin = 16;                                  // breathing room
+            const kbTop = window.innerHeight - kbHeight;        // keyboard's top edge
             const rect = activeInput.getBoundingClientRect();
-            const viewportH = window.innerHeight;
-            const inputBottom = rect.bottom + 16; // 16px breathing room
-            if (inputBottom > viewportH - kbHeight) {
-                activeInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // If the field is behind (or close to) the keyboard, scroll it up
+            // until its bottom sits just above the keyboard.
+            if (rect.bottom > kbTop - margin) {
+                window.scrollBy({ top: rect.bottom - (kbTop - margin), behavior: 'smooth' });
             }
         });
     }
