@@ -124,7 +124,13 @@ if [ "$(id -u)" = "0" ]; then
     CHROME_FLAGS+=(--no-sandbox --test-type)
 fi
 
-CHROME_FLAGS+=(--disable-gpu --disable-software-rasterizer)
+# GPU flags: ONLY disable the GPU inside a VM. On real hardware this pair
+# leaves Chrome with no renderer and it exits ~2s after launch (the relaunch
+# loop then becomes a "loading page keeps restarting" lockout). A real PC
+# should use its GPU.
+if systemd-detect-virt --quiet 2>/dev/null; then
+    CHROME_FLAGS+=(--disable-gpu --disable-software-rasterizer)
+fi
 
 LOADING_URL="http://localhost:__PORT__/kiosk/loading"
 
@@ -136,10 +142,20 @@ while true; do
     fi
 
     echo "Launching: __BROWSER__ ${CHROME_FLAGS[*]} $LOADING_URL"
+    START=$(date +%s)
     __BROWSER__ "${CHROME_FLAGS[@]}" "$LOADING_URL"
     RETCODE=$?
-    echo "Chrome exited with code $RETCODE at $(date)"
-    sleep 2
+    RUNTIME=$(( $(date +%s) - START ))
+    echo "Chrome exited with code $RETCODE at $(date) (ran ${RUNTIME}s)"
+    # Crash-loop backoff: if Chrome died in <10s, wait 30s instead of relaunching
+    # every 2s, so the kiosk stays reachable instead of hard-locking.
+    if [ "$RUNTIME" -lt 10 ]; then
+        date +%s > "$CRASH_FILE"
+        echo "Chrome died in <10s — backing off 30s to stay recoverable"
+        sleep 30
+    else
+        sleep 2
+    fi
 done
 XINITRC
 

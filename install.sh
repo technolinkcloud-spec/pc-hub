@@ -533,8 +533,14 @@ if [ "$(id -u)" = "0" ]; then
     CHROME_FLAGS+=(--no-sandbox --test-type)
 fi
 
-# VM-friendly GPU flags
-CHROME_FLAGS+=(--disable-gpu --disable-software-rasterizer)
+# GPU flags: ONLY disable the GPU inside a virtual machine. On real hardware
+# this pair (especially --disable-software-rasterizer) leaves Chrome with no
+# renderer at all, so it paints once and exits ~2s after launch — and the
+# relaunch loop below turns that into an unrecoverable "loading page keeps
+# restarting" lockout. A real PC should use its GPU.
+if systemd-detect-virt --quiet 2>/dev/null; then
+    CHROME_FLAGS+=(--disable-gpu --disable-software-rasterizer)
+fi
 
 # Always start with the loading page
 LOADING_URL="http://localhost:__PORT__/kiosk/loading"
@@ -549,10 +555,22 @@ while true; do
     fi
 
     echo "Launching: __BROWSER__ ${CHROME_FLAGS[*]} $LOADING_URL"
+    START=$(date +%s)
     __BROWSER__ "${CHROME_FLAGS[@]}" "$LOADING_URL"
     RETCODE=$?
-    echo "Chrome exited with code $RETCODE at $(date)"
-    sleep 2
+    RUNTIME=$(( $(date +%s) - START ))
+    echo "Chrome exited with code $RETCODE at $(date) (ran ${RUNTIME}s)"
+    # If Chrome died almost immediately it is crash-looping. Record the time and
+    # back off 30s instead of relaunching every 2s, so the screen stays usable
+    # and reachable (you can still tap the logo / switch to a console) instead
+    # of hard-locking on a ~2s reload forever.
+    if [ "$RUNTIME" -lt 10 ]; then
+        date +%s > "$CRASH_FILE"
+        echo "Chrome died in <10s — backing off 30s to stay recoverable"
+        sleep 30
+    else
+        sleep 2
+    fi
 done
 XINITRC
 
