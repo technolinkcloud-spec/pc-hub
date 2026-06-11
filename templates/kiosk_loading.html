@@ -187,22 +187,30 @@
         }
 
         // --- Phase 2: Check URL reachability ---
+        let inErrorState = false;   // true once the Connection Error screen is shown
+
         function startUrlCheck() {
             if (stopped) return;
             phase = 'checking';
-            statusEl.innerHTML = '<div class="status-text">Checking connection...</div>';
-            barEl.style.transition = 'none';
-            barEl.style.width = '0';
+            // Only show "Checking..." on the first attempt. Background re-checks
+            // while in the error state stay silent so the screen doesn't flash.
+            if (!inErrorState) {
+                statusEl.innerHTML = '<div class="status-text">Checking connection...</div>';
+                barEl.style.transition = 'none';
+                barEl.style.width = '0';
+            }
 
             fetch('/kiosk/api/check-url')
                 .then(r => r.json())
                 .then(data => {
                     if (stopped) return;
                     if (data.reachable) {
+                        inErrorState = false;
                         phase = 'connected';
                         statusEl.innerHTML =
                             '<div class="status-text status-ok">Connected</div>' +
                             '<div class="status-detail">Redirecting to ' + escapeHtml(data.url) + '</div>';
+                        barEl.style.transition = 'none';
                         barEl.style.width = '100%';
                         navigate(data.url);
                     } else {
@@ -211,37 +219,36 @@
                 })
                 .catch(() => {
                     if (stopped) return;
-                    showError({url: '', error: 'Service not ready'});
+                    showError({url: '', error: 'Service unavailable'});
                 });
         }
 
-        // --- Phase 3: Error → retry with countdown ---
+        // --- Phase 3: Connection error ---
+        // Show a clear, STABLE error screen (rendered once). Keep re-checking
+        // quietly in the background — no on-screen countdown — so the kiosk
+        // recovers on its own when the URL becomes reachable again.
         function showError(data) {
             if (stopped) return;
             phase = 'error';
-            let remaining = RETRY_INTERVAL;
 
-            statusEl.innerHTML =
-                '<div class="status-error">' + escapeHtml(data.error || 'Connection failed') + '</div>' +
-                (data.url ? '<div class="status-detail" style="margin-top:8px;">Target: ' + escapeHtml(data.url) + '</div>' : '') +
-                '<div class="status-detail" style="margin-top:12px;">Retrying in <span class="retry-countdown" id="retry-cd">' + remaining + '</span>s...</div>';
+            if (!inErrorState) {
+                inErrorState = true;
+                statusEl.innerHTML =
+                    '<div class="status-error">Connection Error</div>' +
+                    '<div class="status-detail" style="margin-top:8px;">' +
+                    escapeHtml(data.error || 'Cannot reach the configured URL') + '</div>' +
+                    (data.url ? '<div class="status-detail" style="margin-top:8px;">Target: ' +
+                        escapeHtml(data.url) + '</div>' : '') +
+                    '<div class="status-detail" style="margin-top:14px;color:#5a5e76;">' +
+                    'Tap the logo to open the admin panel.</div>';
+                barEl.style.transition = 'none';
+                barEl.style.width = '0';
+            }
 
-            barEl.style.transition = 'none';
-            barEl.style.width = '100%';
-
-            const interval = setInterval(function() {
-                if (stopped) { clearInterval(interval); return; }
-                remaining--;
-                var cdEl = document.getElementById('retry-cd');
-                if (cdEl) cdEl.textContent = remaining;
-                barEl.style.transition = 'width 1s linear';
-                barEl.style.width = ((remaining / RETRY_INTERVAL) * 100) + '%';
-
-                if (remaining <= 0) {
-                    clearInterval(interval);
-                    startUrlCheck();
-                }
-            }, 1000);
+            // Quietly retry; redirect as soon as the URL is reachable again.
+            if (!stopped) {
+                setTimeout(startUrlCheck, RETRY_INTERVAL * 1000);
+            }
         }
 
         function escapeHtml(text) {
