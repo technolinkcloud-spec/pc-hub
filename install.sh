@@ -151,7 +151,11 @@ install_packages() {
                 python3 python3-pip python3-venv python-is-python3 \
                 git sqlite3 curl wget unzip procps iproute2
             apt-get install -y network-manager 2>/dev/null || true
-            apt-get install -y systemd-timesyncd libnss3-tools 2>/dev/null || true
+            # systemd-timesyncd: keep the clock right (a wrong clock breaks TLS
+            # so an HTTPS kiosk URL fails cert validation and never loads).
+            # fake-hwclock: restore the last-known time on boot when the RTC
+            # battery is dead / there's no network yet.
+            apt-get install -y systemd-timesyncd fake-hwclock libnss3-tools 2>/dev/null || true
             # Networking + audio tools (audio for kiosk media, ethtool for WoL).
             apt-get install -y ethtool net-tools 2>/dev/null || true
             apt-get install -y alsa-utils pulseaudio pavucontrol 2>/dev/null || true
@@ -242,6 +246,15 @@ else
 fi
 
 log "System packages installed"
+
+# Enable automatic time sync. A wrong clock makes HTTPS certificate validation
+# fail, so an https:// kiosk URL never loads and the loading screen retries
+# forever. Turning NTP on lets the clock self-correct once the network is up.
+if command -v timedatectl >/dev/null 2>&1; then
+    systemctl enable --now systemd-timesyncd 2>/dev/null || true
+    timedatectl set-ntp true 2>/dev/null || true
+    log "Automatic time sync (NTP) enabled — current time: $(date)"
+fi
 
 # ══════════════════════════════════════════════════════════════
 #  STEP 2: Copy project files

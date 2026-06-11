@@ -128,7 +128,6 @@
         function navigate(url) {
             if (stopped) return;
             stopped = true;
-            try { sessionStorage.setItem('kioskLastNav', url); } catch (e) {}
             window.location.replace(url);
         }
 
@@ -293,34 +292,6 @@
         });
 
         // --- Init ---
-        // DEBUG (temporary, v1.10.2): prove what "restart" actually is.
-        //   load #N  → climbs on a JS/DevTools page reload (same browser
-        //              session survives); resets to 1 if Chrome restarted.
-        //   navType  → 'reload'  = F5 / DevTools Page.reload (external)
-        //              'navigate'= our location.replace / a fresh URL load
-        //              'back_forward' = history nav
-        //   lastNav  → the URL our own navigate() last sent us to (blank if
-        //              the reload did NOT come from this page's JS).
-        (function showReloadDebug() {
-            var n = parseInt(sessionStorage.getItem('kioskLoadCount') || '0', 10) + 1;
-            try { sessionStorage.setItem('kioskLoadCount', String(n)); } catch (e) {}
-            var nav = '?';
-            try {
-                var navEntry = performance.getEntriesByType('navigation')[0];
-                nav = navEntry ? navEntry.type
-                    : (performance.navigation ? performance.navigation.type : '?');
-            } catch (e) {}
-            var last = '';
-            try { last = sessionStorage.getItem('kioskLastNav') || ''; } catch (e) {}
-            var dbg = document.createElement('div');
-            dbg.style.cssText = 'position:fixed;top:6px;left:6px;z-index:99999;' +
-                'background:#000;color:#0f0;font:12px/1.4 monospace;padding:4px 8px;' +
-                'border:1px solid #0f0;border-radius:4px;';
-            dbg.textContent = 'load #' + n + '  navType=' + nav +
-                (last ? '  lastNav=' + last : '');
-            document.body.appendChild(dbg);
-        })();
-
         loadLogo();
         loadNetInfo();
         startLogoCountdown();
