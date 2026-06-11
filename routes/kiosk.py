@@ -9,7 +9,7 @@ import logging
 import urllib.request
 import urllib.error
 import websocket as ws_client
-from flask import Blueprint, render_template, request, jsonify
+from flask import Blueprint, render_template, request, jsonify, make_response
 from auth_utils import login_required
 from database import get_setting, set_setting
 from config import BIND_PORT
@@ -152,7 +152,10 @@ def kiosk_page():
 @kiosk_bp.route('/loading')
 def loading_page():
     """Loading page shown on boot before redirecting to kiosk URL."""
-    return render_template('kiosk_loading.html')
+    resp = make_response(render_template('kiosk_loading.html'))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
 
 
 @kiosk_bp.route('/api/netinfo')
