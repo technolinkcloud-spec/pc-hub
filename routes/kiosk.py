@@ -96,7 +96,13 @@ def _launch_chromium(url=None):
 
 
 def _watchdog_loop():
-    """Watchdog: restart Chromium if it crashes."""
+    """Watchdog: relaunch Chromium only if the process actually died.
+
+    It must NOT kill a running browser just because the kiosk URL is
+    unreachable — that would tear the screen away from whatever is showing
+    (including the admin dashboard) every 10s. An unreachable URL is already
+    handled gracefully by the loading page's Connection Error screen.
+    """
     global _watchdog_running, _chromium_process
     while _watchdog_running:
         time.sleep(10)
@@ -105,12 +111,6 @@ def _watchdog_loop():
         pid = _get_kiosk_pid()
         if pid is None and _watchdog_running:
             _launch_chromium()
-
-        url = get_setting('kiosk_url', 'https://www.google.com')
-        if not _is_url_reachable(url):
-            _kill_chromium()
-            time.sleep(1)
-            _launch_chromium(f'http://127.0.0.1:{BIND_PORT}/kiosk/error-page')
 
 
 def _kill_chromium():
