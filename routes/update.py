@@ -290,8 +290,13 @@ def offline_run():
             yield f"data: [INFO] Running: {update_script}\n\n"
             yield f"data: [INFO] Working directory: {extract_dir}\n\n"
 
+            # Run WITHOUT sudo: the service user already owns the install dir
+            # (so it can copy files in) and has NOPASSWD for
+            # `systemctl restart kiosk-manager` (which update.sh uses). Using
+            # `sudo bash` here would prompt for a password and fail, breaking
+            # dashboard-only offline updates for operators with no console.
             proc = subprocess.Popen(
-                ['sudo', 'bash', update_script],
+                ['bash', update_script],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, cwd=extract_dir
             )
