@@ -122,6 +122,9 @@ function saveKioskSettings() {
     }).catch(err => Toast.error(err.message));
 }
 
+// Restarting Chrome always relaunches it on the loading page, so if you are
+// driving the dashboard from the kiosk screen itself this ends your session.
+// Confirm first — the same courtesy the sidebar's Restart Chrome already gives.
 function saveAndRestart() {
     const data = {
         url: $('#kiosk-url').value,
@@ -129,12 +132,21 @@ function saveAndRestart() {
         cursor: $('#kiosk-cursor').checked,
         check_timeout: parseInt($('#kiosk-check-timeout').value) || 5,
     };
-    api('/kiosk/api/settings', { method: 'POST', body: data }).then(() => {
-        return api('/kiosk/api/restart', { method: 'POST' });
-    }).then(() => {
-        Toast.success('Settings saved & kiosk restarted');
-        setTimeout(refreshStatus, 1500);
-    }).catch(err => Toast.error(err.message));
+    Modal.show('Save & Restart Chrome',
+        'Settings will be saved and <strong>Chrome will restart</strong>.<br><br>' +
+        'If you are using this dashboard on the kiosk screen, it will return to ' +
+        'the loading page and you will need to log in again. Use <strong>Save</strong> ' +
+        'instead to apply settings without restarting.',
+        () => {
+            api('/kiosk/api/settings', { method: 'POST', body: data }).then(() => {
+                return api('/kiosk/api/restart', { method: 'POST' });
+            }).then(() => {
+                Toast.success('Settings saved & kiosk restarted');
+                setTimeout(refreshStatus, 1500);
+            }).catch(err => Toast.error(err.message));
+        },
+        'Save & Restart', 'btn-warning'
+    );
 }
 
 function loadDevToolsTabs() {
@@ -179,18 +191,19 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(refreshStatus, 10000);
     loadDevToolsTabs();
 
-    // Instant cursor toggle — apply immediately + restart Chrome
+    // Instant cursor toggle. NO Chrome restart: hide_cursor.py hides the cursor
+    // on the X root window via XFixes, which is display-wide and applies the
+    // moment the process starts or is killed. Restarting Chrome here did
+    // nothing for the cursor and tore the admin session away — Chrome always
+    // relaunches on the loading page — so anyone touching this checkbox mid-
+    // config got kicked out of the dashboard.
     const cursorCheckbox = $('#kiosk-cursor');
     if (cursorCheckbox) {
         cursorCheckbox.addEventListener('change', function() {
             const show = this.checked;
             api('/kiosk/api/cursor', { method: 'POST', body: { show: show } }).then(() => {
                 Toast.success(show ? 'Cursor enabled' : 'Cursor hidden');
-                // Auto-restart Chrome so the change takes effect in the kiosk
-                return api('/kiosk/api/restart', { method: 'POST' });
-            }).then(() => {
-                Toast.info('Chrome restarting to apply cursor change...');
-                setTimeout(refreshStatus, 1500);
+                setTimeout(refreshStatus, 500);
             }).catch(err => Toast.error(err.message));
         });
     }

@@ -271,29 +271,33 @@
         }
 
         // --- W/Q cursor shortcuts ---
+        // No Chrome restart: hide_cursor.py toggles the cursor display-wide via
+        // XFixes and applies immediately. Restarting also reloaded this page,
+        // which reset the URL-check countdown every time someone hit W or Q.
+        function setCursorMode(show, label) {
+            fetch('/kiosk/api/cursor', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ show: show })
+            }).then(function() {
+                statusEl.innerHTML = '<div class="status-text' + (show ? ' status-ok' : '') +
+                    '">' + label + '</div>';
+                // We just overwrote the Connection Error screen. Clear the flag so
+                // the next background re-check re-renders it instead of leaving
+                // the cursor message on screen forever.
+                inErrorState = false;
+            }).catch(function() {});
+        }
+
         document.addEventListener('keydown', function(e) {
             if (e.key === 'w' || e.key === 'W') {
                 e.preventDefault();
-                fetch('/kiosk/api/cursor', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ show: true })
-                }).then(function() {
-                    statusEl.innerHTML = '<div class="status-text status-ok">Cursor enabled — restarting...</div>';
-                    return fetch('/kiosk/api/restart', { method: 'POST' });
-                }).catch(function() {});
+                setCursorMode(true, 'Cursor Mode — cursor visible');
                 return;
             }
             if (e.key === 'q' || e.key === 'Q') {
                 e.preventDefault();
-                fetch('/kiosk/api/cursor', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ show: false })
-                }).then(function() {
-                    statusEl.innerHTML = '<div class="status-text">Cursor hidden — restarting...</div>';
-                    return fetch('/kiosk/api/restart', { method: 'POST' });
-                }).catch(function() {});
+                setCursorMode(false, 'Touchscreen Mode — cursor hidden');
                 return;
             }
         });

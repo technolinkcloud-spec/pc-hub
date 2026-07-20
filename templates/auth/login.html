@@ -51,13 +51,15 @@
             toastTimer = setTimeout(() => { toast.classList.remove('show'); }, 2000);
         }
 
+        // No Chrome restart: hide_cursor.py toggles the cursor display-wide via
+        // XFixes and takes effect immediately. Restarting here used to kill
+        // Chrome and bounce the screen back to the loading page — so a PIN
+        // containing 'w' or 'q' made login impossible from the kiosk itself.
         function setCursor(show) {
             fetch('/kiosk/api/cursor', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ show: show })
-            }).then(() => {
-                return fetch('/kiosk/api/restart', { method: 'POST' });
             }).catch(() => {});
         }
 
