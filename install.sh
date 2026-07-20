@@ -568,6 +568,24 @@ LOADING_URL="http://localhost:__PORT__/kiosk/loading"
 
 # Launch Chrome in a loop
 while true; do
+    # Never launch a second instance on the same profile. Chromium refuses to
+    # start one: it hands the URL to the already-running browser ("Opening in
+    # existing browser session") and exits 0 straight away — which navigates
+    # whatever the operator is looking at (e.g. the admin dashboard) to the
+    # loading page, and looks to this loop like a crash, so it backs off 30s and
+    # does it again forever. If some other launcher owns Chrome, wait it out.
+    # Helper processes (--type=renderer/zygote/gpu-process, crashpad) don't
+    # count — only a main browser process holds the profile.
+    if ps -u "$(id -u)" -o args= 2>/dev/null \
+         | grep -F -- '__BROWSER__' \
+         | grep -v -- '--type=' \
+         | grep -v 'crashpad' \
+         | grep -q .; then
+        echo "Another __BROWSER__ already owns the profile — waiting instead of relaunching"
+        sleep 5
+        continue
+    fi
+
     # Clean crash state to prevent "Restore pages?" dialog
     CHROME_PREFS="$HOME/.config/chromium/Default/Preferences"
     if [ -f "$CHROME_PREFS" ]; then

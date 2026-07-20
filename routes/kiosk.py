@@ -58,8 +58,29 @@ def _get_kiosk_pid():
     return None
 
 
+def _xinit_supervisor_present():
+    """True when ~/.xinitrc is supervising Chrome (the installer's startx model).
+
+    That loop relaunches Chrome every time it exits, so this app must never
+    launch its own instance alongside it. Chromium refuses a second instance on
+    the same profile: it hands the URL to the already-running browser
+    ("Opening in existing browser session") and exits 0 immediately. The loop
+    reads that instant exit as a crash, backs off 30s, and tries again — so the
+    screen gets force-navigated to the loading page every 30 seconds forever,
+    tearing the operator off the dashboard mid-config.
+    """
+    try:
+        return os.path.isfile(os.path.expanduser('~/.xinitrc'))
+    except Exception:
+        return False
+
+
 def _launch_chromium(url=None):
-    """Launch Chromium in kiosk mode."""
+    """Launch Chromium in kiosk mode.
+
+    Only call this when no supervisor owns the display — see
+    _xinit_supervisor_present().
+    """
     global _chromium_process
 
     if url is None:
@@ -102,6 +123,11 @@ def _watchdog_loop():
     unreachable — that would tear the screen away from whatever is showing
     (including the admin dashboard) every 10s. An unreachable URL is already
     handled gracefully by the loading page's Connection Error screen.
+
+    It must also NOT launch when ~/.xinitrc supervises the display. That loop
+    can back off for up to 30s after a kill, and this poll runs every 10s — so
+    the watchdog would win the race, claim the Chrome profile, and leave the
+    two supervisors fighting. Relaunching is the loop's job; here we only watch.
     """
     global _watchdog_running, _chromium_process
     while _watchdog_running:
@@ -109,7 +135,7 @@ def _watchdog_loop():
         if not _watchdog_running:
             break
         pid = _get_kiosk_pid()
-        if pid is None and _watchdog_running:
+        if pid is None and _watchdog_running and not _xinit_supervisor_present():
             _launch_chromium()
 
 
@@ -246,6 +272,12 @@ def launch():
     pid = _get_kiosk_pid()
     if pid:
         return jsonify({'error': 'Chromium is already running', 'pid': pid}), 400
+    if _xinit_supervisor_present():
+        return jsonify({
+            'success': True, 'supervised': True,
+            'message': 'The kiosk display loop relaunches Chrome automatically '
+                       '(it can wait up to 30s after a crash).',
+        })
     new_pid = _launch_chromium()
     return jsonify({'success': True, 'pid': new_pid})
 
@@ -256,6 +288,12 @@ def restart():
     if get_sys().is_headless:
         return jsonify({'error': 'Cannot restart kiosk in headless mode (no display server)'}), 400
     _kill_chromium()
+    # Killing is enough when ~/.xinitrc supervises: its loop relaunches Chrome
+    # on the loading page a couple of seconds later. Launching our own instance
+    # here used to beat that retry by a second, permanently claiming the Chrome
+    # profile and leaving .xinitrc hijacking the screen every 30s.
+    if _xinit_supervisor_present():
+        return jsonify({'success': True, 'supervised': True})
     time.sleep(1)
     new_pid = _launch_chromium()
     return jsonify({'success': True, 'pid': new_pid})
