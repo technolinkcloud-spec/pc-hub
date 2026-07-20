@@ -149,16 +149,52 @@ def pull():
     def generate():
         try:
             _ensure_correct_remote()
-            proc = subprocess.Popen(
-                ['git', 'pull', '--ff-only'],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, cwd=BASE_DIR
-            )
-            for line in iter(proc.stdout.readline, ''):
-                yield f"data: {line.rstrip()}\n\n"
-            proc.wait()
 
-            if proc.returncode == 0:
+            # Offline .zip updates rsync code straight over this git working
+            # tree (update.sh knows nothing about git), so tracked files drift
+            # and git refuses to fast-forward: "Your local changes ... would be
+            # overwritten by merge". Without recovery here the dashboard updater
+            # is stuck for good on any kiosk that ever had an offline update
+            # applied — and the console is the only way out. So: stash the drift
+            # (recoverable via `git stash list`) and retry once.
+            rc = 1
+            for attempt in (1, 2):
+                proc = subprocess.Popen(
+                    ['git', 'pull', '--ff-only'],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, cwd=BASE_DIR
+                )
+                out = []
+                for line in iter(proc.stdout.readline, ''):
+                    out.append(line.rstrip())
+                    yield f"data: {line.rstrip()}\n\n"
+                proc.wait()
+                rc = proc.returncode
+
+                if rc == 0 or attempt == 2:
+                    break
+
+                blob = '\n'.join(out).lower()
+                if ('would be overwritten' not in blob
+                        and 'stash them before you merge' not in blob):
+                    break
+
+                yield ("data: [INFO] Local file drift detected (from an offline "
+                       "update?). Stashing it and retrying...\n\n")
+                stash = subprocess.run(
+                    ['git', 'stash', 'push', '-m',
+                     'kiosk-manager auto-stash before update'],
+                    capture_output=True, text=True, cwd=BASE_DIR, timeout=30
+                )
+                for stash_line in (stash.stdout + stash.stderr).strip().splitlines():
+                    yield f"data: {stash_line}\n\n"
+                if stash.returncode != 0:
+                    yield "data: [ERROR] Could not stash local changes.\n\n"
+                    break
+                yield ("data: [INFO] Drift stashed — inspect or restore it with "
+                       "'git stash list' / 'git stash pop'.\n\n")
+
+            if rc == 0:
                 yield f"data: [SUCCESS] Update complete. Version: {_get_version()}\n\n"
                 yield "data: [INFO] Installing dependencies...\n\n"
                 venv_pip = os.path.join(BASE_DIR, 'venv', 'bin', 'pip')
@@ -190,7 +226,7 @@ def pull():
                     yield "data: [INFO] Auto-restart not available. Please restart manually.\n\n"
                 return
             else:
-                yield f"data: [ERROR] Update failed with exit code {proc.returncode}\n\n"
+                yield f"data: [ERROR] Update failed with exit code {rc}\n\n"
 
             yield "data: [DONE]\n\n"
         except Exception as e:
