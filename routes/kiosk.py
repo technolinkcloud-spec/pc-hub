@@ -536,9 +536,18 @@ def init_kiosk_ws(sock):
 
         try:
             while not stop.is_set():
-                msg = ws.receive(timeout=1)
-                if msg is None:
+                # receive() returns None when the 1s timeout expires, and raises
+                # when the client actually goes away. Treating None as a
+                # disconnect closed the tunnel after the first idle second —
+                # which DevTools hits constantly (e.g. sitting on the Network
+                # panel waiting for events), so the inspector reported
+                # "Debugging connection was closed" seconds after opening.
+                try:
+                    msg = ws.receive(timeout=1)
+                except Exception:
                     break
+                if msg is None:
+                    continue
                 chrome_ws.send(msg)
         except Exception:
             pass

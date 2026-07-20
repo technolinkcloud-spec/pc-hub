@@ -254,9 +254,28 @@ def upload_cert():
                 return jsonify({'error': 'Failed to convert DER certificate'}), 500
             cert_path = pem_path
 
-        # Install certificate with CT,C,C trust (trusted for SSL, email, code signing)
+        # Pick the trust flags to match what this certificate actually is.
+        # "CT,C,C" means "trust as a certificate authority" and only works for a
+        # real CA: Chrome refuses to use a certificate with basicConstraints
+        # CA:FALSE as a trust anchor, so a self-signed *server* cert installed
+        # this way still fails with ERR_CERT_AUTHORITY_INVALID. Such a cert has
+        # to be trusted as a peer ("P,,") instead — verified working against a
+        # self-signed site on Chromium 150.
+        trust = 'CT,C,C'
+        try:
+            probe = subprocess.run(
+                ['openssl', 'x509', '-in', cert_path, '-noout',
+                 '-ext', 'basicConstraints'],
+                capture_output=True, text=True, timeout=10
+            )
+            # No basicConstraints at all also means "not a CA" (RFC 5280).
+            if probe.returncode == 0 and 'CA:TRUE' not in probe.stdout.upper():
+                trust = 'P,,'
+        except Exception:
+            pass  # undetectable — keep the CA trust that was always used
+
         result = subprocess.run(
-            ['certutil', '-d', f'sql:{nssdb}', '-A', '-t', 'CT,C,C', '-n', name, '-i', cert_path],
+            ['certutil', '-d', f'sql:{nssdb}', '-A', '-t', trust, '-n', name, '-i', cert_path],
             capture_output=True, text=True, timeout=10
         )
 
@@ -268,8 +287,9 @@ def upload_cert():
         if result.returncode != 0:
             return jsonify({'error': f'certutil failed: {result.stderr.strip()}'}), 500
 
-        logger.info('Installed certificate: %s', name)
-        return jsonify({'success': True, 'name': name})
+        logger.info('Installed certificate: %s (trust %s)', name, trust)
+        return jsonify({'success': True, 'name': name, 'trust': trust,
+                        'kind': 'authority' if trust == 'CT,C,C' else 'self-signed server'})
     except FileNotFoundError:
         return jsonify({'error': 'certutil not found. Install: sudo apt install libnss3-tools'}), 500
     except Exception as e:
