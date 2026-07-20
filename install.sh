@@ -139,6 +139,22 @@ echo ""
 # ══════════════════════════════════════════════════════════════
 header "Step 1/$TOTAL_STEPS — Installing system packages"
 
+# Fix the clock BEFORE touching apt. A PC whose RTC has drifted (dead CMOS
+# battery, or never set) makes apt reject every repository signature —
+# "Not live until <date> ... OpenPGP signature verification failed" — so the
+# package installs below silently fall back to stale indexes or fail outright.
+# A wrong clock also breaks TLS everywhere afterwards.
+if command -v timedatectl >/dev/null 2>&1; then
+    timedatectl set-ntp true 2>/dev/null || true
+    systemctl start systemd-timesyncd 2>/dev/null || true
+    sleep 3
+    info "Clock: $(date)"
+    if ! timedatectl 2>/dev/null | grep -qi 'System clock synchronized: yes'; then
+        warn "Clock not synchronized yet — if apt reports signature errors below,"
+        warn "  set the time manually: sudo date -s 'YYYY-MM-DD HH:MM:SS' && sudo hwclock -w"
+    fi
+fi
+
 install_packages() {
     case "$PKG_MGR" in
         apt)
@@ -330,6 +346,9 @@ add_sudoers_entry cp ""
 # release .zip on kiosks with no internet — all as the non-root service user.
 add_sudoers_entry mount ""
 add_sudoers_entry umount ""
+# udevadm lets update.sh install/reload the USB auto-mount rule unattended,
+# without anyone having to log in as root.
+add_sudoers_entry udevadm ""
 
 # Display sudoers entries (always add since we install X11 on headless too)
 add_sudoers_entry xrandr ""

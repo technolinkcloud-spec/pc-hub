@@ -72,12 +72,14 @@ fi
 echo
 info "2/3  USB auto-mount"
 if [ -f "$DIR/usb-automount.sh" ]; then
-    if [ "$IS_ROOT" = "1" ]; then
-        bash "$DIR/usb-automount.sh" && ok "USB auto-mount installed" \
-            || warn "USB auto-mount failed — see the message above"
+    # usb-automount.sh handles privileges itself: as root directly, otherwise
+    # through the passwordless sudo the installer grants for tee/udevadm.
+    if bash "$DIR/usb-automount.sh"; then
+        ok "USB auto-mount configured"
     else
-        warn "Needs root. Re-run as:  sudo bash $DIR/apply-fixes.sh"
-        warn "(everything else in this script has still been applied)"
+        warn "USB auto-mount could not be configured — see the message above"
+        [ "$IS_ROOT" = "1" ] || \
+            warn "Running once as root will fix it:  sudo bash $DIR/apply-fixes.sh"
     fi
 else
     warn "usb-automount.sh missing from $DIR — skipping"

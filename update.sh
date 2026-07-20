@@ -44,6 +44,20 @@ fi
 NEW_VER="$(cat "$INSTALL_DIR/version.txt" 2>/dev/null || echo '?')"
 echo "[OK] Files updated — now at version $NEW_VER"
 
+# Apply the things that live OUTSIDE the install dir and therefore cannot
+# arrive with a code update: the system clock, the USB auto-mount udev rule,
+# and any certificates in certs/. Requiring a separate manual command meant it
+# never got run on a real kiosk. Each step uses the passwordless sudo rules the
+# installer grants, so no root login is needed.
+#
+# Never fatal: `set -e` is on, and a repair failing must not abort an update
+# whose code changes have already been written to disk.
+if [ -f "$INSTALL_DIR/apply-fixes.sh" ]; then
+    echo "[*] Applying post-update fixes (clock, USB auto-mount, certificates)..."
+    bash "$INSTALL_DIR/apply-fixes.sh" || \
+        echo "[!] Some post-update fixes did not apply — see above. Update itself is fine."
+fi
+
 # Restart detached + delayed so this script (and the dashboard's live output)
 # can finish before systemd SIGTERMs the service. `sudo systemctl restart
 # kiosk-manager` is NOPASSWD-allowed, so it works without a console.
