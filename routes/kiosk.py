@@ -8,6 +8,7 @@ import time
 import logging
 import urllib.request
 import urllib.error
+import ssl
 import websocket as ws_client
 from flask import Blueprint, render_template, request, jsonify, make_response
 from auth_utils import login_required
@@ -29,10 +30,37 @@ def _find_chromium():
     return get_sys().get_browser() or 'chromium-browser'
 
 
-def _is_url_reachable(url, timeout=5):
-    """Check if a URL is reachable."""
+def _open_url(url, timeout):
+    """Open a URL, tolerating a certificate the SYSTEM trust store rejects.
+
+    This probe answers "is the target up?", not "is its certificate valid?".
+    Python validates against /etc/ssl/certs, which knows nothing about certs
+    installed into Chrome's NSS store (~/.pki/nssdb) via the dashboard — so a
+    kiosk pointed at an internal site with a private or self-signed cert used
+    to sit on "Connection Error" forever, and Chrome was never even handed the
+    URL. Certificate validation belongs to Chrome, which has its own trust
+    store and shows its own interstitial.
+
+    Returns (response, tls_untrusted).
+    """
     try:
-        urllib.request.urlopen(url, timeout=timeout)
+        return urllib.request.urlopen(url, timeout=timeout), False
+    except urllib.error.URLError as e:
+        # HTTPError is a URLError subclass; its .reason is a string, so real
+        # HTTP errors fall through this check and propagate as before.
+        if not isinstance(e.reason, ssl.SSLError):
+            raise
+    except ssl.SSLError:
+        pass
+    return urllib.request.urlopen(
+        url, timeout=timeout, context=ssl._create_unverified_context()
+    ), True
+
+
+def _is_url_reachable(url, timeout=5):
+    """Check if a URL is reachable (see _open_url on certificate handling)."""
+    try:
+        _open_url(url, timeout)
         return True
     except Exception:
         return False
@@ -231,9 +259,9 @@ def check_url():
     url = get_setting('kiosk_url', 'https://www.google.com')
     timeout = int(get_setting('kiosk_check_timeout', '5'))
     try:
-        resp = urllib.request.urlopen(url, timeout=timeout)
+        resp, tls_untrusted = _open_url(url, timeout)
         return jsonify({'reachable': True, 'url': url, 'status': resp.getcode(),
-                        'timeout': timeout})
+                        'timeout': timeout, 'tls_untrusted': tls_untrusted})
     except urllib.error.HTTPError as e:
         return jsonify({'reachable': False, 'url': url, 'status': e.code,
                         'error': f'HTTP {e.code}: {e.reason}'})

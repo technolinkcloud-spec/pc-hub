@@ -209,7 +209,14 @@
                         phase = 'connected';
                         statusEl.innerHTML =
                             '<div class="status-text status-ok">Connected</div>' +
-                            '<div class="status-detail">Redirecting to ' + escapeHtml(data.url) + '</div>';
+                            '<div class="status-detail">Redirecting to ' + escapeHtml(data.url) + '</div>' +
+                            // Reachability was confirmed only by skipping certificate
+                            // validation. Say so rather than hiding it — Chrome still
+                            // applies its own trust rules to the page itself.
+                            (data.tls_untrusted
+                                ? '<div class="status-detail" style="margin-top:8px;color:#b08a3c;">' +
+                                  'Certificate not trusted by the system store — Chrome will verify it separately</div>'
+                                : '');
                         barEl.style.transition = 'none';
                         barEl.style.width = '100%';
                         navigate(data.url);
