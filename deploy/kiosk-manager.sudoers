@@ -21,3 +21,8 @@ kiosk ALL=(ALL) NOPASSWD: /bin/systemctl reboot
 kiosk ALL=(ALL) NOPASSWD: /usr/bin/systemctl reboot
 kiosk ALL=(ALL) NOPASSWD: /bin/systemctl poweroff
 kiosk ALL=(ALL) NOPASSWD: /usr/bin/systemctl poweroff
+# Offline USB updates (usb-update.sh): mount/umount a flash drive as non-root
+kiosk ALL=(ALL) NOPASSWD: /usr/bin/mount
+kiosk ALL=(ALL) NOPASSWD: /bin/mount
+kiosk ALL=(ALL) NOPASSWD: /usr/bin/umount
+kiosk ALL=(ALL) NOPASSWD: /bin/umount

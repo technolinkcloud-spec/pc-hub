@@ -5,6 +5,7 @@ __pycache__/
 *.pyd
 .Python
 venv/
+.venv/
 env/
 .env
 
@@ -27,3 +28,5 @@ Thumbs.db
 
 # Local-only artifacts
 kiosk-fix-remote.zip
+# Offline update packages — rebuild with: bash deploy/make-offline-zip.sh
+kiosk-manager-*-offline.zip

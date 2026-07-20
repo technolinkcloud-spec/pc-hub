@@ -326,6 +326,11 @@ add_sudoers_entry ethtool ""
 add_sudoers_entry tee ""
 add_sudoers_entry cp ""
 
+# Offline USB updates: mount/umount a flash drive so usb-update.sh can read the
+# release .zip on kiosks with no internet — all as the non-root service user.
+add_sudoers_entry mount ""
+add_sudoers_entry umount ""
+
 # Display sudoers entries (always add since we install X11 on headless too)
 add_sudoers_entry xrandr ""
 add_sudoers_entry wlr-randr ""
