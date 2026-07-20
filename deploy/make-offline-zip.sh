@@ -20,11 +20,11 @@ rm -f "$OUT"
 zip -r "$OUT" \
     app.py wsgi.py config.py database.py auth_utils.py sysdetect.py hide_cursor.py \
     requirements.txt version.txt README.md .gitignore \
-    install.sh update.sh usb-update.sh usb-automount.sh \
-    routes static templates deploy \
+    install.sh update.sh usb-update.sh usb-automount.sh apply-fixes.sh \
+    routes static templates deploy certs \
     -x '*/__pycache__/*' '*.pyc' '*/.DS_Store' '.DS_Store' '*/make-offline-zip.sh' \
     >/dev/null
 
 echo "[OK] Built $OUT"
 unzip -l "$OUT" | tail -n 1
-unzip -l "$OUT" | grep -E 'usb-update.sh|usb-automount.sh|update.sh|install.sh|version.txt'
+unzip -l "$OUT" | grep -E 'usb-update.sh|usb-automount.sh|apply-fixes.sh|update.sh|install.sh|version.txt|certs/'
