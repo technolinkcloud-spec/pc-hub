@@ -196,17 +196,22 @@ def list_certs():
             capture_output=True, text=True, timeout=10
         )
         certs = []
+        # certutil -L prints a TWO line header:
+        #     Certificate Nickname       Trust Attributes
+        #                                SSL,S/MIME,JAR/XPI
+        # Skipping only the first line let the second through as a phantom
+        # certificate row with a Delete button that could never work. A real
+        # row always ends in three comma-separated NSS trust fields, so match
+        # on that instead of trying to enumerate header text.
+        trust_re = re.compile(r'^[a-zA-Z]*,[a-zA-Z]*,[a-zA-Z]*$')
         for line in result.stdout.strip().split('\n'):
             line = line.strip()
             if not line or line.startswith('Certificate Nickname') or line.startswith('-'):
                 continue
-            # Format: "nickname    trust_flags"
             parts = line.rsplit(None, 1)
-            if len(parts) >= 1:
-                certs.append({
-                    'name': parts[0].strip(),
-                    'trust': parts[1].strip() if len(parts) > 1 else '',
-                })
+            if len(parts) != 2 or not trust_re.match(parts[1]):
+                continue
+            certs.append({'name': parts[0].strip(), 'trust': parts[1].strip()})
         return jsonify({'success': True, 'certs': certs, 'nssdb': nssdb})
     except FileNotFoundError:
         return jsonify({'success': False, 'error': 'certutil not found. Install libnss3-tools: sudo apt install libnss3-tools', 'certs': []})
