@@ -285,7 +285,7 @@ log "Data directory ready"
 # ══════════════════════════════════════════════════════════════
 #  STEP 5: Auto-detect sudoers (dynamic binary paths)
 # ══════════════════════════════════════════════════════════════
-header "Step 5/$TOTAL_STEPS — Configuring sudoers"
+header "Step 5/$TOTAL_STEPS — Configuring sudoers & USB auto-mount"
 
 SUDOERS_FILE="/etc/sudoers.d/kiosk-manager"
 echo "# Kiosk Manager sudoers — auto-generated $(date)" > "$SUDOERS_FILE"
@@ -360,6 +360,22 @@ if [ -x "$VISUDO_BIN" ]; then
     fi
 else
     warn "visudo not found — skipping syntax check (sudoers file written to $SUDOERS_FILE)"
+fi
+
+# ── USB auto-mount ───────────────────────────────────────────
+# A bare X session has no udisks2/gvfs, so nothing mounts a flash drive when
+# it's plugged in — and Chrome's file picker can only browse MOUNTED
+# filesystems, so the dashboard's Offline Update dialog showed no USB at all.
+# usb-automount.sh installs a udev rule that fixes that. Non-fatal: a kiosk
+# without it still updates from a console via usb-update.sh.
+if [ -f "$INSTALL_DIR/usb-automount.sh" ]; then
+    if bash "$INSTALL_DIR/usb-automount.sh"; then
+        log "USB auto-mount configured — sticks appear under /media/"
+    else
+        warn "USB auto-mount could not be configured (see message above)"
+    fi
+else
+    warn "usb-automount.sh not found in $INSTALL_DIR — skipping USB auto-mount"
 fi
 
 # ══════════════════════════════════════════════════════════════
